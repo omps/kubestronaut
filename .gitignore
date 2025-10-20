@@ -9,3 +9,7 @@ blog/*
 id_rsa
 .pub
 ckad/containers/my-node-app/*
+*.tar
+output.tar
+*.tar.gz
+*.zip
