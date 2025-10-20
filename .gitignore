@@ -1,1 +1,10 @@
 ^.obsidian/*
+.obsidian/
+.tmp.driveupload/
+blog/*
+.env*
+.pass/*
+.pass
+.key
+id_rsa
+.pub
