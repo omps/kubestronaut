@@ -8,3 +8,4 @@ blog/*
 .key
 id_rsa
 .pub
+ckad/containers/my-node-app/*
