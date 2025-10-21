@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-development
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nodeweb
+  template:
+    metadata:
+      labels:
+        app: nodeweb
+    spec:
+      containers:
+      - name: nodeweb
+        image: docker.io/instructorbryce/node-k8s-app:latest
+        ports:
+        - containerPort: 3000
+      imagePullSecrets:
+        - name: mysecret

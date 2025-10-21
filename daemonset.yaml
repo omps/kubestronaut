@@ -1,0 +1,19 @@
+# daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-writer
+spec:
+  selector:
+    matchLabels:
+      name: log-writer
+  template:
+    metadata:
+      labels:
+        name: log-writer
+    spec:
+      containers:
+      - name: logger
+        image: busybox
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do echo $(date) writing logs...; sleep 5; done"]

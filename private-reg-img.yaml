@@ -5,6 +5,6 @@ metadata:
 spec:
   containers:
   - name: private-reg-container
-    image: $PRIVATE_IMG
+    image: docker.io/omps/simplehttpserver:v1.0
   imagePullSecrets:
   - name: mysecret
