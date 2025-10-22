@@ -1,0 +1,17 @@
+# cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: temp-cleaner
+spec:
+  schedule: "*/1 * * * *" #run every minute
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: cleaner
+            image: busybox
+            command: ["/bin/sh", "-c"]
+            args: ["echo cleaning up temp files at $(date)"]
+          restartPolicy: OnFailure

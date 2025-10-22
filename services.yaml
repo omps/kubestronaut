@@ -1,0 +1,13 @@
+# services.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodeweb-service
+spec:
+  selector:
+    app: nodeweb
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 3000
+  type: NodePort 
