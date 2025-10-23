@@ -15,7 +15,7 @@ spec:
       mountPath: /shared
   containers:
   - name: nginx
-    image: nginx-multicontainer-app:v1.0
+    image: docker.io/omps/nginx-multicontainer-app:v1.0
     ports:
     - containerPort: 80
     volumeMounts:
