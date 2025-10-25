@@ -7,11 +7,24 @@ metadata:
   name: nginx
 spec:
   containers:
-    - image: nginx:1.24.0
-      name: nginx
-      ports:
-      - containerPort: 80
-      resources: {}
+  - image: nginx
+    name: nginx
+    ports:
+    - containerPort: 80
+    volumeMounts: 
+    - name: nginx-volume
+      mountPath: /usr/share/nginx/html
+    resources: {}
   dnsPolicy: ClusterFirst
   restartPolicy: Never
-status: {}
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo "Test" > /work-dir/index.html' ]
+    volumeMounts: 
+    - name: nginx-volume
+      mountPath: /work-dir
+  volumes:
+    - name: nginx-volume
+      emptyDir: {}
+
