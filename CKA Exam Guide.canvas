@@ -1,0 +1,10 @@
+{
+	"nodes":[
+		{"id":"6c8ba773c1b396bc","x":-55,"y":-199,"width":395,"height":400,"type":"link","url":"https://github.com/alijahnas/CKA-practice-exercises"},
+		{"id":"a54eb364d6edd6b2","x":420,"y":-199,"width":400,"height":400,"type":"link","url":"https://github.com/alijahnas/CKA-practice-exercises/blob/CKA-v1.27/cluster-architecture-installation-configuration.md"},
+		{"id":"3ca0ac521ca384b9","x":-154,"y":-380,"width":250,"height":60,"color":"1","type":"text","text":"CKA Exam Guide Notes\nWell notes for CKA Exams"}
+	],
+	"edges":[
+		{"id":"557d0041ffab3cf9","fromNode":"6c8ba773c1b396bc","fromSide":"right","toNode":"a54eb364d6edd6b2","toSide":"left"}
+	]
+}
