@@ -326,3 +326,256 @@ Then you can join any number of worker nodes by running the following on each as
   
 
 kubeadm join 172.31.16.102:6443 --token h4klmi.3ch8b67luy4nsdbn --discovery-token-ca-cert-hash sha256:fd34857d817e2080db12323e094c41a70036a8394b0e993568bc0841973c7a55
+
+
+
+>[!Lab Setup using Vagrant]
+
+- Brings up 3 VirtualBox VMs (k8s-controlplane, k8s-node-1, k8s-node-2)
+    
+- Uses Ubuntu 22.04 cloud image (`ubuntu/jammy64`)
+    
+- Sets static private IPs on a host-only/private network (172.16.1.11/21 etc.)
+    
+- Installs containerd, kubeadm/kubelet/kubectl, configures sysctl & disables swap
+    
+- Initializes the control plane with `kubeadm init`, installs a Pod network (Flannel), and writes a `kubeadm join` command to `/vagrant/kubeadm_join.sh`
+    
+- Each worker waits for `/vagrant/kubeadm_join.sh` and then executes it (so joins the cluster)
+    
+
+Drop this file in an empty directory, run `vagrant up` and it will attempt to perform the full setup. I included safety/wait loops so nodes wait for the controlplane join script.
+
+> Notes:
+> 
+> - This is intended for local dev/testing only.
+>     
+> - The shared `/vagrant` folder is used to pass the join command from controlplane -> nodes.
+>     
+> - If you prefer Calico or a different CNI, change the pod-network manifest step in the controlplane provisioner.
+>     
+> - You may want to increase memory/CPUs depending on host capacity.
+>     
+
+---
+
+```ruby
+# Vagrantfile - Kubernetes cluster (kubeadm) on VirtualBox, Ubuntu 22.04
+# Save as Vagrantfile in an empty directory and run `vagrant up`
+
+Vagrant.configure("2") do |config|
+  # Basic common config
+  config.vm.box = "ubuntu/jammy64"
+  config.ssh.insert_key = false   # use default vagrant key for convenience
+  config.vm.synced_folder ".", "/vagrant" # project dir shared with guests
+
+  # Reusable shell to install containerd + kubeadm/kubelet/kubectl
+  common_install = <<-SHELL
+#!/usr/bin/env bash
+set -eux
+
+# set noninteractive
+export DEBIAN_FRONTEND=noninteractive
+
+# update and install prerequisites
+apt-get update -y
+apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+# Disable swap (kubeadm requirement)
+swapoff -a
+sed -i.bak '/ swap / s/^/#/' /etc/fstab || true
+
+# sysctl for bridge traffic
+modprobe overlay
+modprobe br_netfilter
+cat > /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.ipv4.ip_forward                 = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+EOF
+sysctl --system
+
+# Install containerd
+if ! command -v containerd >/dev/null 2>&1; then
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+  echo \
+    "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update -y
+  apt-get install -y containerd.io
+
+  # configure containerd and restart
+  mkdir -p /etc/containerd
+  containerd config default >/etc/containerd/config.toml
+  systemctl restart containerd
+  systemctl enable containerd
+fi
+
+# Install kubeadm, kubelet, kubectl
+if ! dpkg -l | grep -q kubeadm; then
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+  cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+  apt-get update -y
+  apt-get install -y kubelet kubeadm kubectl
+  apt-mark hold kubelet kubeadm kubectl
+fi
+
+# ensure /home/vagrant owns .kube later
+chown -R vagrant:vagrant /home/vagrant || true
+SHELL
+
+  # Define control plane
+  config.vm.define "k8s-controlplane" do |cp|
+    cp.vm.hostname = "k8s-controlplane"
+    cp.vm.network "private_network", ip: "172.16.1.11", netmask: "255.255.255.0"
+    cp.vm.provider "virtualbox" do |vb|
+      vb.name = "k8s-controlplane"
+      vb.memory = 4096
+      vb.cpus = 2
+    end
+
+    # Install common prerequisites
+    cp.vm.provision "shell", inline: common_install
+
+    # Control plane specific provisioning
+    cp.vm.provision "shell", inline: <<-SHELL
+#!/usr/bin/env bash
+set -eux
+
+# Only run kubeadm init once
+if [ ! -f /etc/kubernetes/admin.conf ]; then
+  # kubeadm init
+  kubeadm init --apiserver-advertise-address=172.16.1.11 --pod-network-cidr=10.244.0.0/16
+
+  # configure kubeconfig for vagrant user
+  mkdir -p /home/vagrant/.kube
+  cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+  chown vagrant:vagrant /home/vagrant/.kube -R
+
+  # Install flannel as CNI (simple for demo). Replace if you prefer calico.
+  su - vagrant -c "kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml"
+
+  # Create a join script that workers can execute (written to /vagrant shared folder)
+  # Wait until the control plane is ready to give token (simple sleep + retry)
+  for i in $(seq 1 30); do
+    if kubectl get nodes >/dev/null 2>&1; then break; fi
+    sleep 2
+  done
+
+  kubeadm token create --print-join-command > /vagrant/kubeadm_join.sh
+  chmod +x /vagrant/kubeadm_join.sh
+
+  # optionally expose kubeconfig for host in /vagrant/admin.conf
+  cp /etc/kubernetes/admin.conf /vagrant/admin.conf
+  chown $(stat -c '%u:%g' /vagrant/admin.conf) /vagrant/admin.conf || true
+else
+  echo "kubeadm already initialized - skipping"
+fi
+SHELL
+  end
+
+  # Worker 1
+  config.vm.define "k8s-node-1" do |node|
+    node.vm.hostname = "k8s-node-1"
+    node.vm.network "private_network", ip: "172.16.1.21", netmask: "255.255.255.0"
+    node.vm.provider "virtualbox" do |vb|
+      vb.name = "k8s-node-1"
+      vb.memory = 2048
+      vb.cpus = 2
+    end
+
+    node.vm.provision "shell", inline: common_install
+
+    # Wait for /vagrant/kubeadm_join.sh, then join
+    node.vm.provision "shell", inline: <<-SHELL
+#!/usr/bin/env bash
+set -eux
+
+# Wait up to 5 minutes for the join script produced by controlplane
+JOIN_SCRIPT="/vagrant/kubeadm_join.sh"
+i=0
+until [ -f "${JOIN_SCRIPT}" ]; do
+  i=$((i+1))
+  echo "Waiting for ${JOIN_SCRIPT} to appear... ($i)"
+  if [ $i -ge 150 ]; then
+    echo "Timed out waiting for ${JOIN_SCRIPT}"
+    exit 1
+  fi
+  sleep 2
+done
+
+chmod +x "${JOIN_SCRIPT}"
+# run the join script (may require sudo)
+sudo bash "${JOIN_SCRIPT}" --v 5 || true
+
+# After join ensure kubelet running
+systemctl enable --now kubelet
+SHELL
+  end
+
+  # Worker 2
+  config.vm.define "k8s-node-2" do |node|
+    node.vm.hostname = "k8s-node-2"
+    node.vm.network "private_network", ip: "172.16.1.22", netmask: "255.255.255.0"
+    node.vm.provider "virtualbox" do |vb|
+      vb.name = "k8s-node-2"
+      vb.memory = 2048
+      vb.cpus = 2
+    end
+
+    node.vm.provision "shell", inline: common_install
+
+    node.vm.provision "shell", inline: <<-SHELL
+#!/usr/bin/env bash
+set -eux
+
+# Wait up to 5 minutes for the join script produced by controlplane
+JOIN_SCRIPT="/vagrant/kubeadm_join.sh"
+i=0
+until [ -f "${JOIN_SCRIPT}" ]; do
+  i=$((i+1))
+  echo "Waiting for ${JOIN_SCRIPT} to appear... ($i)"
+  if [ $i -ge 150 ]; then
+    echo "Timed out waiting for ${JOIN_SCRIPT}"
+    exit 1
+  fi
+  sleep 2
+done
+
+chmod +x "${JOIN_SCRIPT}"
+sudo bash "${JOIN_SCRIPT}" --v 5 || true
+
+systemctl enable --now kubelet
+SHELL
+  end
+
+  # Provider-level config: ensure VirtualBox provider is used and VMs not headless unless desired
+  config.vm.provider :virtualbox do |vb|
+    # global VirtualBox defaults (can override per-VM)
+    vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+  end
+end
+```
+
+---
+
+>[!note] How to use
+
+1. Put the `Vagrantfile` into an empty directory on a machine with:
+    - VirtualBox installed
+    - Vagrant installed
+2. Run:
+```bash
+vagrant up
+    ```
+    This will create three VMs and run the provisioning. Expect it to take ~15–40 minutes depending on host resources and network speed.
+3. After `vagrant up` completes:
+    - Control plane kubeconfig is available on the host at `./admin.conf`. You can use it with:
+```bash
+export KUBECONFIG=$(pwd)/admin.conf
+kubectl get nodes
+        ```
+    - Or `vagrant ssh k8s-controlplane` and `kubectl get nodes`.
+4. If a worker did not join: `vagrant ssh k8s-node-1` and look at `/var/log/` and `sudo kubeadm join ...` can be executed manually (the join command is also in `./kubeadm_join.sh`).
