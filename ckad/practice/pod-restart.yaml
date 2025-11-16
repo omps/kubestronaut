@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    run: failpod
+  name: failpod
+spec:
+  containers:
+  - args:
+    - "false"
+    image: busybox
+    name: failpod
+    resources: {}
+  dnsPolicy: ClusterFirst
+  restartPolicy: Never
+status: {}
